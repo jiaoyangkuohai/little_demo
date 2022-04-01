@@ -5,7 +5,7 @@
 @filename  : SimpleXGBoost.py
 """
 import logging
-import functools
+import math
 
 import numpy as np
 import pandas as pd
@@ -16,6 +16,12 @@ ch = logging.StreamHandler()
 formatter = logging.Formatter('%(asctime)s -%(levelname)s - %(module)s: %(lineno)d - %(message)s')
 ch.setFormatter(formatter)
 logger.addHandler(ch)
+
+
+pd.set_option("display.max_columns", 20)
+pd.set_option("display.max_rows", 20)
+pd.set_option("display.width", 2000)
+pd.set_option("display.max_colwidth", 2000)
 
 # 保存g函数
 G_FUNC = {}
@@ -110,6 +116,22 @@ class TreeNode:
         logger.info(f"排序结果: \n{ordered_feature}")
         return ordered_feature
 
+    def predict(self, x: dict):
+        feature_value = x[self.split_name]
+        logger.debug(f"x:{x}, split name: {self.split_name}, split value: {self.split_value}")
+        if feature_value < self.split_value or feature_value is None:
+            if self.left is None:
+                logger.debug(f"left leaf: {self.left_leaf}")
+                return self.left_leaf
+            else:
+                return self.left.predict(x)
+        else:
+            if self.right is None:
+                logger.debug(f"right leaf: {self.right_leaf}")
+                return self.right_leaf
+            else:
+                return self.right.predict(x)
+
     def fit(self, df, feature_names):
         """
         这里可以并行寻找
@@ -161,16 +183,16 @@ class TreeNode:
     def summary(self):
 
         if self.left is None and self.right is None:
-            logger.info(f"最大收益: {self.gain_max}, 获取的分裂点feature为 {self.split_name}, value为 {self.split_value}, "
+            logger.info(f"获取的分裂点feature为 {self.split_name}, value为 {self.split_value}, "
                         f"left leaf为 {self.left_leaf}, right leaf为 {self.right_leaf}")
         elif self.left is None:
-            logger.info(f"最大收益: {self.gain_max}, 获取的分裂点feature为 {self.split_name}, value为 {self.split_value}, "
+            logger.info(f"获取的分裂点feature为 {self.split_name}, value为 {self.split_value}, "
                         f"left leaf为 {self.left_leaf}")
         elif self.right is None:
-            logger.info(f"最大收益: {self.gain_max}, 获取的分裂点feature为 {self.split_name}, value为 {self.split_value}, "
+            logger.info(f"获取的分裂点feature为 {self.split_name}, value为 {self.split_value}, "
                         f"right leaf为 {self.right_leaf}")
         else:
-            logger.info(f"最大收益: {self.gain_max}, 获取的分裂点feature为 {self.split_name}, value为 {self.split_value}")
+            logger.info(f"获取的分裂点feature为 {self.split_name}, value为 {self.split_value}")
 
         if self.left is not None:
             self.left.summary()
@@ -218,12 +240,11 @@ class Tree:
         self.obj = None
         self.gain = 0
 
-        self.root = None
+        self.root: TreeNode = None
         self.p_lambda = p_lambda
         self.gamma = gamma
 
         self.shrink = shrink
-
 
     def fit(self, df):
         self.root = TreeNode(self.p_lambda, self.gamma, self.max_depth, self.shrink, 1)
@@ -231,6 +252,9 @@ class Tree:
 
         logger.info("tree summary:")
         self.root.summary()
+
+    def predict(self, x):
+        return self.root.predict(x)
 
 
 class SimpleXGBoostClassifier:
@@ -241,7 +265,7 @@ class SimpleXGBoostClassifier:
 
     摒弃各种技巧及优化加速方法，采用最原始方法去生成树
     """
-    def __init__(self, max_depth=3, shrink=0.1, tree_max_num=1, gamma=0, p_lambda=1, method="quadratic", base_score=0.5, label_name="y"):
+    def __init__(self, max_depth=3, shrink=0.1, tree_max_num=2, gamma=0, p_lambda=1, method="quadratic", base_score=0.5, label_name="y"):
         # 单棵树的最大深度
         self.max_depth = max_depth
         # shrink值
@@ -267,9 +291,12 @@ class SimpleXGBoostClassifier:
         self.base_score = base_score
         self.label_name = label_name
 
-        self.g0_name = "g"
-        self.h0_name = "h"
+        self.g0_name = "g_0"
+        self.h0_name = "h_0"
         self.sample_index = "index"
+
+        self.g = "g"
+        self.h = "h"
 
     def get_ordered_features(self, df: pd.DataFrame):
         """
@@ -300,6 +327,10 @@ class SimpleXGBoostClassifier:
         # 获取初始g h
         df[self.g0_name] = df[self.label_name].map(lambda x: G_FUNC[self.method](self.base_score, x))
         df[self.h0_name] = df[self.label_name].map(lambda x: H_FUNC[self.method](self.base_score, x))
+
+        df[self.g] = df[self.g0_name]
+        df[self.h] = df[self.h0_name]
+
         df[self.sample_index] = list(range(1, df.shape[0]+1))
         logger.info(f"获取初始g和h: \n{df}")
 
@@ -309,10 +340,23 @@ class SimpleXGBoostClassifier:
             logger.info(f"开始生成第{i}棵树")
             tree = self.generate_next_tree(i, df, self.ordered_feature)
             self.trees.append(tree)
+            df['predict'] = df[["x1", "x2"]].apply(lambda x: self.predict(x), axis=1)
+            logger.info(f"生成第{i}课树后，进行预测：\n{df}")
             logger.info("*"*50)
+            df[f"g_{i+1}"] = df[[self.label_name, 'predict']].apply(lambda x: G_FUNC[self.method](x['predict'], x[self.label_name]), axis=1)
+            df[f"h_{i+1}"] = df[[self.label_name, 'predict']].apply(lambda x: H_FUNC[self.method](x['predict'], x[self.label_name]), axis=1)
+            df[self.g] = df[f"g_{i+1}"]
+            df[self.h] = df[f"h_{i+1}"]
+            logger.info(f"准备训练下一课树的数据:\n{df}")
 
-    def predict(self):
-        pass
+    def predict(self, x):
+        result = 0
+        for tree in self.trees:
+            result += tree.predict(x)
+        return self.prob(result)
+
+    def prob(self, x):
+        return 1 / (1 + math.pow(math.e, - x))
 
 
 def get_data():
@@ -330,7 +374,7 @@ def get_data():
 def main():
     # https://blog.csdn.net/qq_22238533/article/details/79477547
     df = get_data()
-    simple_xgb = SimpleXGBoostClassifier(method="classifier")
+    simple_xgb = SimpleXGBoostClassifier(method="classifier", tree_max_num=6)
     simple_xgb.fit(df)
 
 
