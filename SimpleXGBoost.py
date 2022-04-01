@@ -18,7 +18,7 @@ ch.setFormatter(formatter)
 logger.addHandler(ch)
 
 
-pd.set_option("display.max_columns", 20)
+pd.set_option("display.max_columns", 200)
 pd.set_option("display.max_rows", 20)
 pd.set_option("display.width", 2000)
 pd.set_option("display.max_colwidth", 2000)
@@ -331,7 +331,7 @@ class SimpleXGBoostClassifier:
         df[self.g] = df[self.g0_name]
         df[self.h] = df[self.h0_name]
 
-        df[self.sample_index] = list(range(1, df.shape[0]+1))
+        # df[self.sample_index] = list(range(1, df.shape[0]+1))
         logger.info(f"获取初始g和h: \n{df}")
 
         for i in range(self.tree_max_num):
@@ -341,6 +341,7 @@ class SimpleXGBoostClassifier:
             tree = self.generate_next_tree(i, df, self.ordered_feature)
             self.trees.append(tree)
             df['predict'] = df[["x1", "x2"]].apply(lambda x: self.predict(x), axis=1)
+            df['y_hat'] = df.predict.map(lambda x: self.get_y_hat(x))
             logger.info(f"生成第{i}课树后，进行预测：\n{df}")
             logger.info("*"*50)
             df[f"g_{i+1}"] = df[[self.label_name, 'predict']].apply(lambda x: G_FUNC[self.method](x['predict'], x[self.label_name]), axis=1)
@@ -348,6 +349,12 @@ class SimpleXGBoostClassifier:
             df[self.g] = df[f"g_{i+1}"]
             df[self.h] = df[f"h_{i+1}"]
             logger.info(f"准备训练下一课树的数据:\n{df}")
+
+    def get_y_hat(self, x):
+        if x >= 0.5:
+            return 1
+        else:
+            return 0
 
     def predict(self, x):
         result = 0
@@ -374,7 +381,7 @@ def get_data():
 def main():
     # https://blog.csdn.net/qq_22238533/article/details/79477547
     df = get_data()
-    simple_xgb = SimpleXGBoostClassifier(method="classifier", tree_max_num=6)
+    simple_xgb = SimpleXGBoostClassifier(method="classifier", tree_max_num=5, max_depth=3, base_score=0.5)
     simple_xgb.fit(df)
 
 
