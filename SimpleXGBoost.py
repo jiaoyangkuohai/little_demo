@@ -294,6 +294,7 @@ class SimpleXGBoostClassifier:
         self.g0_name = "g_0"
         self.h0_name = "h_0"
         self.sample_index = "index"
+        self.predict_col = "predict"
 
         self.g = "g"
         self.h = "h"
@@ -325,8 +326,9 @@ class SimpleXGBoostClassifier:
         # 数据预处理
         self.get_ordered_features(df)
         # 获取初始g h
-        df[self.g0_name] = df[self.label_name].map(lambda x: G_FUNC[self.method](self.base_score, x))
-        df[self.h0_name] = df[self.label_name].map(lambda x: H_FUNC[self.method](self.base_score, x))
+        df[self.predict_col] = self.base_score
+        df[self.g0_name] = df[[self.label_name, self.predict_col]].apply(lambda x: G_FUNC[self.method](x[self.predict_col], x[self.label_name]), axis=1)
+        df[self.h0_name] = df[[self.label_name, self.predict_col]].apply(lambda x: H_FUNC[self.method](x[self.predict_col], x[self.label_name]), axis=1)
 
         df[self.g] = df[self.g0_name]
         df[self.h] = df[self.h0_name]
@@ -340,12 +342,12 @@ class SimpleXGBoostClassifier:
             logger.info(f"开始生成第{i}棵树")
             tree = self.generate_next_tree(i, df, self.ordered_feature)
             self.trees.append(tree)
-            df['predict'] = df[["x1", "x2"]].apply(lambda x: self.predict(x), axis=1)
+            df[self.predict_col] = df[["x1", "x2"]].apply(lambda x: self.predict(x), axis=1)
             df['y_hat'] = df.predict.map(lambda x: self.get_y_hat(x))
             logger.info(f"生成第{i}课树后，进行预测：\n{df}")
             logger.info("*"*50)
-            df[f"g_{i+1}"] = df[[self.label_name, 'predict']].apply(lambda x: G_FUNC[self.method](x['predict'], x[self.label_name]), axis=1)
-            df[f"h_{i+1}"] = df[[self.label_name, 'predict']].apply(lambda x: H_FUNC[self.method](x['predict'], x[self.label_name]), axis=1)
+            df[f"g_{i+1}"] = df[[self.label_name, self.predict_col]].apply(lambda x: G_FUNC[self.method](x[self.predict_col], x[self.label_name]), axis=1)
+            df[f"h_{i+1}"] = df[[self.label_name, self.predict_col]].apply(lambda x: H_FUNC[self.method](x[self.predict_col], x[self.label_name]), axis=1)
             df[self.g] = df[f"g_{i+1}"]
             df[self.h] = df[f"h_{i+1}"]
             logger.info(f"准备训练下一课树的数据:\n{df}")
