@@ -6,9 +6,14 @@
 """
 import logging
 import math
+from typing import List
 
+from sklearn.externals.six import StringIO
 import numpy as np
 import pandas as pd
+
+# 用于绘图
+import graphviz
 
 logger = logging.getLogger("xgb logger")
 logger.setLevel(logging.INFO)
@@ -180,6 +185,43 @@ class TreeNode:
             logger.info(f"最大受益:{self.gain_max}, 停止")
             return
 
+    def export_graphviz(self, node_index_name, string_io: StringIO):
+        left_leaf_name = f"left_leaf_{node_index_name}"
+        right_leaf_name = f"right_leaf_{node_index_name}"
+
+        if self.left is None and self.right is None:
+            string_io.write(f"{left_leaf_name}[label={self.left_leaf}] \n {right_leaf_name}[label={self.right_leaf}] \n")
+            string_io.write(f"{node_index_name} -> {left_leaf_name} \n {node_index_name} -> {right_leaf_name} \n")
+
+            logger.info(f"获取的分裂点feature为 {self.split_name}, value为 {self.split_value}, "
+                        f"left leaf为 {self.left_leaf}, right leaf为 {self.right_leaf}")
+
+        elif self.left is None:
+            string_io.write(f"{left_leaf_name}[label={self.left_leaf}] \n")
+            string_io.write(f"{node_index_name} -> {left_leaf_name} \n")
+            logger.info(f"获取的分裂点feature为 {self.split_name}, value为 {self.split_value}, "
+                        f"left leaf为 {self.left_leaf}")
+        elif self.right is None:
+            string_io.write(f"{right_leaf_name}[label={self.right_leaf}] \n")
+            string_io.write(f"{node_index_name} -> {right_leaf_name} \n")
+            logger.info(f"获取的分裂点feature为 {self.split_name}, value为 {self.split_value}, "
+                        f"right leaf为 {self.right_leaf}")
+        else:
+            logger.info(f"获取的分裂点feature为 {self.split_name}, value为 {self.split_value}")
+
+        node_next_index_name = node_index_name
+        if self.left is not None:
+            node_next_index_name += 1
+            string_io.write(
+                f"{node_next_index_name}[label=\"{self.left.split_name}<{self.left.split_value}\"] \n {node_index_name} -> {node_next_index_name} \n")
+            node_next_index_name = self.left.export_graphviz(node_next_index_name, string_io)
+        if self.right is not None:
+            node_next_index_name += 1
+            string_io.write(
+                f"{node_next_index_name}[label=\"{self.right.split_name}<{self.right.split_value}\"] \n {node_index_name} -> {node_next_index_name} \n")
+            node_next_index_name = self.right.export_graphviz(node_next_index_name, string_io)
+        return node_next_index_name
+
     def summary(self):
 
         if self.left is None and self.right is None:
@@ -283,7 +325,7 @@ class SimpleXGBoostClassifier:
         # 提前终止， 当达到条件时终止
         self.pre_stop = False
 
-        self.trees = []
+        self.trees: List[Tree] = []
 
         # 存放按照feature排序好是数据
         self.ordered_feature = {}
@@ -367,6 +409,18 @@ class SimpleXGBoostClassifier:
     def prob(self, x):
         return 1 / (1 + math.pow(math.e, - x))
 
+    def export_graphviz(self):
+        for i, tree in enumerate(self.trees):
+            string_io = StringIO()
+            string_io.write(f"digraph tree_{i} "+"{\n")
+            string_io.write(f"{0}[label=\"{tree.root.split_name}<{tree.root.split_value}\"] \n")
+            tree.root.export_graphviz(0, string_io)
+            string_io.write("\n}")
+            dot_data = string_io.getvalue()
+            print(dot_data)
+            #graph = graphviz.Source(dot_data)
+            #graph.view(f'tree_{i}.pdf')
+
 
 def get_data():
     """
@@ -385,6 +439,7 @@ def main():
     df = get_data()
     simple_xgb = SimpleXGBoostClassifier(method="classifier", tree_max_num=5, max_depth=3, base_score=0.5)
     simple_xgb.fit(df)
+    simple_xgb.export_graphviz()
 
 
 if __name__ == '__main__':
