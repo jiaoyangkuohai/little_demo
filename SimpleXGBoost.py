@@ -84,13 +84,21 @@ def h_classifier_func(y_predict, y_label):
 
 
 class TreeNode:
+    """
+    树中的每一个节点
+    """
     def __init__(self, p_lambda=1, gamma=0, max_depth=3, shrink=0.1, depth=0):
+        # 分裂数值
         self.split_value = None
+        # 分裂字段名称
         self.split_name = None
         self.gamma = gamma
         self.p_lambda = p_lambda
+        # 左节点
         self.left = None
+        # 右节点
         self.right = None
+        # 当节点作为
         self.left_leaf = 0
         self.right_leaf = 0
         self.max_depth = max_depth
@@ -140,6 +148,7 @@ class TreeNode:
     def fit(self, df, feature_names):
         """
         这里可以并行寻找
+
         """
         logger.info(f"fit:\n {df}")
         ordered_features = self.get_ordered_features(df, feature_names)
@@ -186,6 +195,9 @@ class TreeNode:
             return
 
     def export_graphviz(self, node_index_name, string_io: StringIO):
+        """
+        用于绘制树
+        """
         left_leaf_name = f"left_leaf_{node_index_name}"
         right_leaf_name = f"right_leaf_{node_index_name}"
 
@@ -232,6 +244,9 @@ class TreeNode:
             self.right.summary()
 
     def fit_get_gain(self, df, split_name, split_value):
+        """
+
+        """
         df_left = df[(df[split_name] < split_value) | (df[split_name] is None)]
         g_l = df_left["g"].sum()
         h_l = df_left['h'].sum()
@@ -249,13 +264,18 @@ class TreeNode:
         return gain, (split_name, split_value, g_l, g_r, h_l, h_r, df_left, df_right)
 
     def get_gain(self, gl, gr, hl, hr):
+        """计算受益"""
         return gl**2/(hl+self.p_lambda) + gr**2/(hr+self.p_lambda) - (gl+gr)**2/((hl+hr)+self.p_lambda) - self.gamma
 
     def set_leaf_value(self, g, h):
+        """计算叶子节点的值"""
         return - self.shrink * g / (h + self.p_lambda)
 
 
 class Tree:
+    """
+    每一轮会生成一棵树
+    """
     def __init__(self, method="quadratic", max_depth=3, index=0, base_score=0.5, gamma=0, p_lambda=1, shrink=0.1):
         self.base_score = base_score
         self.method = method
@@ -357,8 +377,9 @@ class SimpleXGBoostClassifier:
         """
         # 数据预处理
         self.get_ordered_features(df)
-        # 获取初始g h
+        # base score
         df[self.predict_col] = self.base_score
+        # 获取初始g h
         df[self.g0_name] = df[[self.label_name, self.predict_col]].apply(lambda x: G_FUNC[self.method](x[self.predict_col], x[self.label_name]), axis=1)
         df[self.h0_name] = df[[self.label_name, self.predict_col]].apply(lambda x: H_FUNC[self.method](x[self.predict_col], x[self.label_name]), axis=1)
 
@@ -370,6 +391,7 @@ class SimpleXGBoostClassifier:
 
         for i in range(self.tree_max_num):
             if self.pre_stop:
+                # 没有实现
                 break
             logger.info(f"开始生成第{i}棵树")
             tree = self.generate_next_tree(i, df, self.ordered_feature)
@@ -391,15 +413,24 @@ class SimpleXGBoostClassifier:
             return 0
 
     def predict(self, x):
+        """
+        加法模型
+        """
         result = 0
         for tree in self.trees:
             result += tree.predict(x)
         return self.prob(result)
 
     def prob(self, x):
+        """
+        计算概率
+        """
         return 1 / (1 + math.pow(math.e, - x))
 
     def export_graphviz(self):
+        """
+        在data路径下生成树结构
+        """
         for i, tree in enumerate(self.trees):
             string_io = StringIO()
             string_io.write(f"digraph tree_{i} "+"{\n")
